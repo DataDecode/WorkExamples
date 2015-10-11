@@ -1,0 +1,334 @@
+Cleaning the Data
+========================================================
+Think about doing a hedonic price model.
+
+USE REAL GDP!!!!
+
+I can tease out  more information from the model by using the MIDAS model and get a better indication of 
+
+This example compares various estimation techniques for forecasting GDP.  The techniques include ARIMA, a basic GARCH (1,1) model, time series regressions, and a MIDAS regression. The first 3 models were practiced at Johns Hopkins and the MIDAS model is built off from understanding these models and personal research.  MIDAS is a technique that allows models to use higher frequency data (in this case monthly) to explain less frequent data (in this case quarterly).
+
+This example covers cleaning and preparing the data sets and then analyising each model.  Finally, each model is forecasted for the last 4 periods of GDP to compare them against historical data.
+
+WARNING:  This is a quick analysis of an unruley dataset.  Each technique could be explored more in depth and many specifics about each model could change to effect the acuracy. Were this a work project, there would be more comparison between each of the options within each technique. 
+
+###Cleaning and preping data set###
+The data used in this example is from the federal reserve (FRED) website.  Rather than downloading remotely from the website database, it was downloaded directly.  The data sets use are in the folder on github.
+
+Employment Data: Total Nonfarm Payrolls, Thousands of Persons, Monthly, Seasonally Adjusted
+
+GDP Data: "Nominal Gross Domestic Product, Billions of Dollars, Quarterly, Seasonally Adjusted Annual Rate"
+
+The employment data starts in 1939, but the GDP data does not start until 1947.  Since GDP is the focus of this measurement, the first 8 years of data are dropped when importing the dataset.  
+
+
+GDP and Employment are concurrent datasets, but since the GDP estimates 
+
+```{r}
+setwd("~/Work Examples/MIDAS GDP Model")
+library(xlsx)
+employment<- read.xlsx('TotalNonfarmPayroll.xls', sheetIndex=1, sheetName=NULL, rowIndex=NULL,
+                startRow=108, colIndex=2,
+                as.data.frame=TRUE, header=FALSE)
+
+gdp<- read.xlsx('GDP.xls', sheetIndex=1, sheetName=NULL, rowIndex=NULL,
+                         startRow=11, colIndex=2,
+                         as.data.frame=TRUE, header=TRUE)
+#took out , endRow=929
+
+#taking monthly data and averaging it in
+library(zoo)
+employment_quarters<- rollapply(employment[,1], width=3, mean, by=3)
+#SHOULD I BE TAKING THE MEAN Or the SUM?  I THINK MEAN SINCE IT IS AN AVERAGE GROWTH OF THE 3 MONTHS
+```
+
+```{r}
+#Quick Test that it worked 
+employment_quarters[1] == mean(employment[1:3,1])
+employment_quarters[2] == mean(employment[4:6,1])
+
+#Set data as time series
+employment_q_ts<- ts(employment_quarters, start = c(1947, 1), frequency=4)
+gdp_q_ts<- ts(gdp,start = c(1947, 1), frequency = 4)
+```
+
+###Initial Evaluation###
+Looking at the plot for GDP, it is clear the data are not covairant stationary.
+```{r fig.width=7, fig.height=6}
+plot(gdp_q_ts)
+```
+
+On this case, it makes sense to take the log of the data since GDP shows itself to generally be exponential. However, this isn't stationary either, so either a trend line or first differencing is necessary.  In this case, we jump to to first differncing.
+
+```{r fig.width=7, fig.height=6}
+plot(diff(log(gdp_q_ts)))
+```
+
+The first differencing of the log looks stationary and the Augmented Dickey-Fuller Test confirms this instinct.  Here, it's compared to an ADF test of the log of GDP.
+```{r, echo=FALSE}
+library(fUnitRoots)
+```
+```{r}
+adfTest(log(gdp_q_ts), lags = 8, type= c('c'))
+```
+In the case of the log of GDP, the null hypothesis can't be rejected, so the series needs to be differenced.
+```{r}
+adfTest(diff(log(gdp_q_ts)), lags = 8, type= c('c'))
+```
+When the logged series is differenced, the null can be rejected and the data are covariant stationary.
+
+
+###ARIMA Model###
+The first step for ARIMA (p,d,q) models is to look at the Autocorrelation Function (acf) and Partial Autocorrelation Function (pacf) to identify the order of the model. When acf shows a seady decline in values it indicates any autocorrelation (AR) in the model.  When pacf shows a steady decline, it typically indicates any moving average (MA) in the model.  
+
+It's important to note that while I term in our model shows no differencing, the data are differenced once once already, so if log(gdp) were used as the base data 'd' would equal 1.
+
+
+```{r}
+library(tseries)
+#assign value
+gdp_log_diff <-  diff(log(gdp_q_ts))
+
+acf(gdp_log_diff, lag= 16)
+pacf(gdp_log_diff, lag= 16)
+```
+
+The two charts above look back 16 periods, or 4 years.  As with most time series, there is not a simple model for what is shown in both fuctions.  There seems to be some seasonaility in the data.  The acf test shows some dampening, which indicates AR pacf and acf test could indicate seasonality.  The pacf cuts off at 2 or 3, indicating an AR(2) or AR(3) for the model.  However, there are instances where pacf shows signifigant lags throughout the 16 periods.  This may be due to seasonaility or MA lags in the data.  
+
+However, the acf test shows a cyclical decline in the values, and the PACF is signifigant through the first lag, but I test multiple models. It's important to note that while the model does not indicate a lag, the data being used for the model has been differenced already.
+
+```{r}
+ar_3<- arima(gdp_log_diff, order= c(3,0,0))
+ar_2<- arima(gdp_log_diff, order= c(2,0,0))
+ar_1<- arima(gdp_log_diff, order= c(1,0,0))
+```
+
+ar_3 AIC: -1763.19 (the 3rd lag is not signifigant)
+ar_2 AIC: -1761.49
+ar_1 AIC: -1757.46
+
+ar_1 AIC is closest to zero, but the AR(2) model is signifigant in the second lag, and is called for when looking at the PACF of the log of GDP differences.  Looking at the residuals of this model indicates there could be some seasonaility, specifically in the 5th and 9th lags.  This is on an annual cycle in the period prior to the current period.  This show up in both the ACF and PACF of the AR(2) residuals, so it makes it hard to tell immediately if the proper seasonal model is AR or MA, so there is a need to test both.
+
+```{r}
+tsdiag(ar_2,gof=8)
+Box.test(ar_2$residuals,8,type='Ljung')
+```
+
+LOOK AT LOG LIKIHOOD. AIC AND SBC, WHAT IS THE DIFFERENCE?  TALK ABOUT WHY YOU LOOK AT ONE RATHER THAN THE OTHER.
+
+Talk about using the standard normal gaussian distribution.  We may want to use different distributions.
+
+THRESHOLD AUTO REGRESSIVE MODEL.
+
+```{r}
+ar2_ma2_sa2<- arima(gdp_log_diff, order= c(2,0,2), seasonal = c(2,0,0))
+tsdiag(ar2_ma2_sa2,gof=8)
+Box.test(ar2_ma2_sa2$residuals,8,type='Ljung')
+```
+
+None of the seaonal ARs or MAs are statistically signifigant but both drop the AIC.  But they don't solve the problem in the ACF and PACF tests, so it's really just a gut call to finding the best model.
+
+
+```{r}
+acf(ar2_ma2_sa2$residuals)
+pacf(ar2_ma2_sa2$residuals)
+plot(ar2_ma2_sa2$residuals)
+```
+
+When looking at a plot of the residuals, it is easy to see there are two distict periods in the economy since GDP has been available, which could be creating the issues with our data.  The first period runs from 1947 to the early 1980s.  During this period, it's easy to see a lot more variance common in the variables.  There are several options.  The two most common would be to just ignore the beginning of the data.  This is commonly done with macro comparisons of the U.S. economy since the period since 1980 is seen as the 'modern' economy. 
+ 
+In this case however, we'd like to keep as much data as we can since there are only 4 instances of GDP every year.  To handle this conditional heterosedasticity, we can use a GARCH model to help contain the variability.  Most economic data is a GARCH (1,1).  While there are many types of GARCH models, and a full analysis would review the many different examples, for this example, we're assuming a GARCH (1,1) with a base ARIMA model of AR 2 with no seasonality.
+
+```{r}
+library(rugarch)
+acf(ar2_ma2_sa2$residuals^2)
+pacf(ar2_ma2_sa2$residuals^2)
+
+# to handel the seasonailty, you need to pass through the data through the forecast package...
+#1. First try fitting the returns using the "forecast" package which 
+#supports SARIMA. 
+#2. If you are satisfied with the residuals, pass them to rugarch (with 
+#armaOrder=c(0,0), include.mean=F and nothing else). 
+
+garch_1 <- ugarchspec(mean.model = list(armaOrder = c(2, 2), include.mean = TRUE), variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),distribution.model = "norm")
+
+ar_2_garch<- ugarchfit(garch_1, data=gdp_log_diff)
+
+plot(residuals(ar_2_garch))
+Box.test(residuals(ar_2_garch),8,type='Ljung')
+```
+So there is still a lot of conditional heterosedasticity, but the model is worth forcasting to see if it gives better predictions.
+
+
+###Adding employment as a regressor###
+Since gdp was differenced and is not out for the 3rd Quarter at the time of the analysis (even though it is over), I need to strip out the first and last values to line up with the same number of values for GDP. (Make sure this makes logical sense).
+
+```{r}
+#Transform back to data frame, cut out last value and difference
+#employment
+employment_quarters<- rollapply(employment[,1], width=3, mean, by=3)
+employment_quarters_diff <- diff(employment_quarters)
+employment_quarters_diff <- data.frame(employment_quarters_diff)
+employment_quarters_diff<- employment_quarters_diff[-274,]
+employment_quarters_diff<- ts(employment_quarters_diff)
+```
+
+```{r}
+em_log_diff<- diff(log(employment_quarters))
+em_log_diff<- data.frame(em_log_diff)
+em_log_diff<- em_log_diff[-274,]
+simple_lm <- lm(gdp_log_diff~em_log_diff)
+simple_lm <- lm(gdp_log_diff~employment_quarters_diff)
+summary(simple_lm)
+```
+A simple look at a linear model of employment's effect on changes in gdp shows a strong relationship.
+
+```{r}
+ar_2_sa2_data <- arima(gdp_log_diff, order= c(2,0,2), seasonal = c(2,0,0), xreg = em_log_diff)
+ar_2_sa2_data
+
+tsdiag(ar_2_sa2_data,gof=8)
+Box.test(ar_2_sa2_data$residuals,8,type='Ljung')
+```
+
+The AIC has gone p, but it is clear that employment is a factor in GDP.
+
+###MIDAS Models###
+The midas model is a way of getting the most out of variables that have a higher frequency than the dependent variable.  Time series data, like the data here, is a good example where GDP is a quarterly data and employment is a monthly data set.  The most common way of dealing with the different frequencies is to average the frequent observations down to the least frequent variable.  This is what was done in the ARIMA regressions above where 3 months of  
+
+ 
+```{r}
+library(midasr)
+#Edit employment data to fit 
+midas_employment<- ts(log(employment))
+midas_employment<- diff(midas_employment)
+
+#delete last 3 rows and first 3.. (is this right?)
+midas_employment_diff<-midas_employment[-c(1,2,3, 823:825),]
+midas_employment_diff<- ts(midas_employment_diff)
+```
+
+This is a quick look at the model without any ARIMA terms and all the stages of monthly employment are signifigant.
+
+We have all the data for the 3rd quarter of gdp, but not the acutal gdp.
+
+```{r}
+#MIDSA model without the AR terms
+midas_noar <- midas_r(gdp_log_diff ~  mls(midas_employment_diff,0:2,3), start=NULL, data = list(gdp_log_diff = gdp_log_diff, midas_employment_diff = midas_employment_diff))
+summary(midas_noar)
+Box.test(ar_2_sa2_data$residuals,8,type='Ljung')
+
+#MIDAS with trend line
+trend <- 1:length(gdp_log_diff)
+midas_trend <- midas_r(gdp_log_diff ~ trend+ mls(midas_employment_diff,0:2,3), start=NULL, data = list(gdp_log_diff = gdp_log_diff, midas_employment_diff = midas_employment_diff))
+
+plot(midas_trend$residuals, type='l')
+
+#AR model
+midas_ar <- midas_r(gdp_log_diff ~ 
+                      mls(gdp_log_diff, 1, 1)+ mls(gdp_log_diff, 2, 1)  + mls(midas_employment_diff,0:2,3), start=NULL)
+
+acf(midas_ar$residuals)
+pacf(midas_ar$residuals)
+```
+So the MIDAS AR(2) model is not perfect, but it would be intersting to take a look at this moving forward.
+
+```{r}
+# You can even look back further into the data than just 3 lags
+midas_ar_6lags <- midas_r(gdp_log_diff ~ 
+                      mls(gdp_log_diff, 1, 1)+ mls(gdp_log_diff, 2, 1)  + mls(midas_employment_diff,0:5,3), start=NULL)
+
+acf(midas_ar_6lags$residuals)
+pacf(midas_ar_6lags$residuals)
+plot(midas_ar_6lags$residuals, type='l')
+```
+
+The variable lags that are highly signifigant make intuitive sense in this model as the job numbers from the last month of the pervious quarter and the first month of the quater could indicat most of the new work force that is effective for the quarter.
+
+```{r}
+midas_ar2_4lags <- midas_r(gdp_log_diff ~ 
+                      mls(gdp_log_diff, 1, 1) + mls(midas_employment_diff,0:3,3), start=NULL)
+
+Box.test(midas_ar2_4lags$residuals,8,type='Ljung')
+```
+
+###Forcasting Values for the given models###
+
+```{r}
+# set up the data frames
+gdp_log_diff_forecast <- data.frame(gdp_log_diff)
+em_log_diff_forecast <- data.frame(em_log_diff)
+midas_employment_forecast<- data.frame(midas_employment_diff)
+
+#create data frames for analysis and comparison
+gdp_actual <- gdp_log_diff_forecast[c(270:273),]
+em_log_diff_actual <- em_log_diff_forecast[c(270:273),]
+midas_employment_actual <- midas_employment_forecast[c(808:819),]
+midas_employment_actual<- data.frame(midas_employment_actual)
+colnames(midas_employment_actual)<- c('employment')
+
+
+#take out the last 4 GDPs
+gdp_log_diff_forecast <- gdp_log_diff_forecast[-c(270:273),]
+gdp_log_diff_forecast <- ts(gdp_log_diff_forecast)
+
+#take out last 4 Employments 
+em_log_diff_forecast  <- em_log_diff_forecast [-c(270:273),]
+em_log_diff_forecast  <- ts(em_log_diff_forecast)
+
+#take 12 out of the midas
+midas_employment_forecast <- midas_employment_forecast[-c(808:819),]
+midas_employment_forecast <- data.frame(midas_employment_forecast)
+```
+
+```{r}
+#take the handful of models you want to use and redo them
+ar2_ma2_sa2_forecast <- arima(gdp_log_diff_forecast, order= c(2,0,2), seasonal = c(2,0,0))
+ar2_ma2_predict <- predict(ar2_ma2_sa2_forecast, n.ahead= 4, newxreg = NULL)
+#What is the predict static or dynamic?
+
+#Arima with employment
+ar_2_sa2_data_forecast <- arima(gdp_log_diff_forecast, order= c(2,0,2), seasonal = c(2,0,0), xreg = em_log_diff_forecast)
+ar_2_sa2_data_predict <- predict(ar_2_sa2_data_forecast, n.ahead= 4, newxreg = em_log_diff_actual)
+
+#Midas regression
+#CANT FIGURE OUT HOW TO GET THE DATA TO BE GOOD
+#midas_ar2_4lags_forecast <- midas_r(gdp_log_diff_forecast ~ 
+#          mls(gdp_log_diff_forecast, 1, 1) + mls(midas_employment_forecast,0:3,3), start=NULL)
+
+#midas_ar2_4lags_predict <- forecast(midas_ar2_4lags_forecast, 
+#          list(midas_employment_forecast=  data.frame(midas_employment_actual$employment)), se = TRUE, level = c(90, 95), 
+#          method = c("dynamic"))
+
+
+#midas_ar2_4lags_predict <- forecast(midas_ar2_4lags_forecast, 
+#          list(midas_employment_forecast= future), se = TRUE, level = c(90, 95), 
+#          method = c("static"))
+
+#nrow(midas_employment_actual$employment)
+
+#insample= midas_employment_forecast
+
+#simulate(midas_ar2_4lags_forecast, nsim = 4, , future = TRUE,
+#newdata = matrix(midas_employment_actual$employment), insample = NULL, method = c("dynamic"),
+#innov = NULL, show_progress = TRUE)
+#test<- forecast(midas_ar_6lags, nsim = 4, future = FALSE)
+# test<- simulate(midas_ar_6lags, nsim = 4, future = FALSE)
+
+#midas_ar_6lags
+#test<- simulate(midas_ar_6lags, nsim = 4, future = FALSE)
+#CANT FIGURE OUT HOW TO GET THE DATA TO BE GOOD
+
+#forecast(object, newdata = NULL, se = FALSE,
+#level = c(80, 95), fan = FALSE, npaths = 999, method = c("static",
+#"dynamic"), insample = get_estimation_sample(object),
+#show_progress = TRUE, add_ts_info = FALSE, ...)
+
+```
+
+
+
+###Next Steps###
+Many of the data sets 
+          
+          
