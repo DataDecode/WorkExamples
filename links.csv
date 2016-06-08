@@ -1,0 +1,41 @@
+source,target,type
+Politics,Elections,type1
+Politics,Politics,type1
+Politics,U.S.,type1
+Politics,Home Page Top Stories,type1
+Elections,Politics,type2
+Elections,U.S.,type2
+Elections,Home Page Top Stories,type2
+Politics,U.S.,type1
+Politics,Home Page Top Stories,type1
+U.S.,Home Page Top Stories,type3
+Politics,Politics,type1
+Politics,NPR Stories For Apple News,type1
+Politics,Elections,type1
+Politics,U.S.,type1
+Politics,Home Page Top Stories,type1
+Politics,NPR Stories For Apple News,type1
+Politics,Elections,type1
+Politics,U.S.,type1
+Politics,Home Page Top Stories,type1
+NPR Stories For Apple News,Elections,type2
+NPR Stories For Apple News,U.S.,type3
+NPR Stories For Apple News,Home Page Top Stories,type4
+Elections,U.S.,type2
+Elections,Home Page Top Stories,type2
+U.S.,Home Page Top Stories,type2
+Elections,Home Page Top Stories,type2
+Elections,Politics,type2
+Elections,NPR Stories For Apple News,type2
+Elections,Elections,type2
+Elections,U.S.,type2
+Home Page Top Stories,Politics,type1
+Home Page Top Stories,NPR Stories For Apple News,type4
+Home Page Top Stories,Elections,type2
+Home Page Top Stories,U.S.,type3
+Politics,NPR Stories For Apple News,type1
+Politics,Elections,type1
+Politics,U.S.,type1
+NPR Stories For Apple News,Elections,type2
+NPR Stories For Apple News,U.S.,type3
+Elections,U.S.,type2
